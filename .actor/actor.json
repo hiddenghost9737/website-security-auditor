@@ -1,0 +1,18 @@
+{
+    "actorSpecification": 1,
+    "name": "website-security-auditor",
+    "title": "Website Security Auditor",
+    "version": "1.0.0",
+    "dockerfile": "./Dockerfile",
+    "output": {
+        "actorOutputSchemaVersion": 1,
+        "title": "Security Scan Results",
+        "properties": {
+            "results": {
+                "type": "string",
+                "title": "View Findings",
+                "template": "{{links.apiDefaultDatasetUrl}}/items"
+            }
+        }
+    }
+}
