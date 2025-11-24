@@ -1,0 +1,27 @@
+{
+    "title": "Website Security Auditor (JS Analyzer)",
+    "type": "object",
+    "schema": {
+        "properties": {
+            "startUrls": {
+                "title": "Target Website URLs",
+                "type": "array",
+                "description": "Enter the website URLs you want to audit.",
+                "editor": "requestListSources"
+            },
+            "maxDepth": {
+                "title": "Crawl Depth",
+                "type": "integer",
+                "description": "How deep to crawl links.",
+                "default": 2
+            },
+            "includeCdn": {
+                "title": "Scan CDN Files",
+                "type": "boolean",
+                "description": "Scan external JS files (e.g., from CDN).",
+                "default": false
+            }
+        },
+        "required": ["startUrls"]
+    }
+}
