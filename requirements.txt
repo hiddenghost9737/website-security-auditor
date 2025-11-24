@@ -1,4 +1,7 @@
-apify
+apify>=2.0.0
+crawlee
 aiohttp
 beautifulsoup4
 jsbeautifier
+pydantic==2.9.2
+typing-extensions>=4.0.0
