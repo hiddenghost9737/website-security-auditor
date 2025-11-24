@@ -1,0 +1,4 @@
+apify
+aiohttp
+beautifulsoup4
+jsbeautifier
