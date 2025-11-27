@@ -2,12 +2,11 @@
   "actorSpecification": 1,
   "name": "js-hunter-advanced",
   "title": "JS Hunter - Advanced JavaScript Security Scanner",
-  "description": "Automatically crawls websites and scans all JavaScript files for exposed secrets, API keys, credentials, and security vulnerabilities. Finds external JS, inline scripts, and hidden JavaScript resources.",
+  "description": "Automatically crawls websites and scans all JavaScript files for exposed secrets, API keys, credentials",
   "version": "1.0",
   "meta": {
     "templateId": "python-start"
   },
-  "input": "./input_schema.json",
   "dockerfile": "./Dockerfile",
   "readme": "./README.md",
   "categories": [
