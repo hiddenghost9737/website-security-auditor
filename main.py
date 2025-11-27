@@ -7,56 +7,174 @@ import aiohttp
 import json
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from bs4 import BeautifulSoup
 import jsbeautifier
 from apify import Actor
 
 # ==============================================================================
-# [SECTION 1] CONFIGURATION & PATTERNS
+# [SECTION 1] ENHANCED CONFIGURATION WITH BETTER PATTERNS
 # ==============================================================================
 
 DEFAULT_CONFIG = {
     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
     "signatures": {
         "CRITICAL": [
-            {"name": "AWS Access Key", "regex": r'\b(AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b', "description": "AWS Access Key ID detected"},
-            {"name": "AWS Secret Key", "regex": r'(?i)aws_secret_access_key\s*[:=]\s*["\']([A-Za-z0-9/+=]{40})["\']', "description": "AWS Secret Access Key found"},
-            {"name": "Google API Key", "regex": r'\bAIza[0-9A-Za-z\\-_]{35}\b', "description": "Google API Key exposed"},
-            {"name": "Firebase Config", "regex": r'firebase(?:Config|app|App).*?apiKey.*?["\']([A-Za-z0-9_-]{20,})["\']', "description": "Firebase API configuration found"},
-            {"name": "Slack Token", "regex": r'xox[baprs]-([0-9a-zA-Z]{10,48})', "description": "Slack authentication token"},
-            {"name": "Stripe Key", "regex": r'(?:r|s)k_(?:live|test)_[0-9a-zA-Z]{24}', "description": "Stripe API key detected"},
-            {"name": "GitHub Token", "regex": r'(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36}', "description": "GitHub personal access token"},
-            {"name": "Private Key", "regex": r'-----BEGIN ((?:RSA|DSA|EC|OPENSSH) PRIVATE KEY)-----', "description": "Private cryptographic key found"},
-            {"name": "JWT Token", "regex": r'\beyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_.-]{20,}\b', "description": "JSON Web Token (JWT) exposed"},
+            {
+                "name": "AWS Access Key",
+                "regex": r'\b(AKIA[0-9A-Z]{16})\b',
+                "description": "AWS Access Key ID detected",
+                "validate": lambda m, ctx: len(m) == 20 and not any(x in ctx.lower() for x in ['example', 'sample', 'test', 'fake', 'dummy'])
+            },
+            {
+                "name": "AWS Secret Key",
+                "regex": r'(?i)aws.{0,20}secret.{0,20}["\']([A-Za-z0-9/+=]{40})["\']',
+                "description": "AWS Secret Access Key found",
+                "validate": lambda m, ctx: len(m) == 40 and 'example' not in ctx.lower()
+            },
+            {
+                "name": "Google API Key",
+                "regex": r'\b(AIza[0-9A-Za-z_-]{35})\b',
+                "description": "Google API Key exposed",
+                "validate": lambda m, ctx: not any(x in ctx.lower() for x in ['example', 'sample', 'placeholder'])
+            },
+            {
+                "name": "Slack Token",
+                "regex": r'\b(xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[0-9a-zA-Z]{24,})\b',
+                "description": "Slack authentication token",
+                "validate": lambda m, ctx: 'example' not in m.lower()
+            },
+            {
+                "name": "Stripe API Key",
+                "regex": r'\b((?:sk|pk)_live_[0-9a-zA-Z]{24,})\b',
+                "description": "Stripe LIVE API key (HIGH RISK)",
+                "validate": lambda m, ctx: '_live_' in m
+            },
+            {
+                "name": "GitHub Token",
+                "regex": r'\b(gh[ps]_[A-Za-z0-9_]{36,})\b',
+                "description": "GitHub personal access token",
+                "validate": lambda m, ctx: not any(x in ctx.lower() for x in ['example', 'your_token', 'fake'])
+            },
+            {
+                "name": "Private Key",
+                "regex": r'-----BEGIN (?:RSA|DSA|EC|OPENSSH) PRIVATE KEY-----',
+                "description": "Private cryptographic key found",
+                "validate": lambda m, ctx: '-----END' in ctx
+            },
+            {
+                "name": "JWT Token",
+                "regex": r'\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]{10,})\b',
+                "description": "JSON Web Token (JWT) exposed",
+                "validate": lambda m, ctx: m.count('.') == 2 and len(m) > 50 and 'example' not in ctx.lower()
+            },
+            {
+                "name": "Generic API Key",
+                "regex": r'(?i)(?:api[_-]?key|apikey)\s*[:=]\s*["\']([a-zA-Z0-9_-]{32,})["\']',
+                "description": "Generic API key found",
+                "validate": lambda m, ctx: len(m) >= 32 and not any(x in m.lower() for x in ['example', 'your', 'xxx', 'test'])
+            }
         ],
         "HIGH": [
-            {"name": "Internal IP", "regex": r'\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b', "description": "Internal/Private IP address"},
-            {"name": "DB Connection", "regex": r'(?i)(mongodb|postgres|mysql|redis|amqp)://[^\s"\']+', "description": "Database connection string"},
-            {"name": "S3 Bucket", "regex": r'[a-z0-9.-]+\.s3\.amazonaws\.com', "description": "AWS S3 bucket URL"},
-            {"name": "Auth Header", "regex": r'(?i)Authorization\s*:\s*["\']?[\w\s]+["\']?', "description": "Authorization header found"},
-            {"name": "Generic Secret", "regex": r'(?i)(secret|password|passwd|token|apikey|api_key)[\s]*[:=][\s]*["\']([a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};:,.<>?\/\\|`~]{16,})["\']', "description": "Generic secret/password pattern"},
+            {
+                "name": "Internal IP Address",
+                "regex": r'\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b',
+                "description": "Internal/Private IP address",
+                "validate": lambda m, ctx: not any(x in ctx.lower() for x in ['version', 'v.', 'jquery', '.min.js', '.js?v=', 'build'])
+            },
+            {
+                "name": "Database Connection String",
+                "regex": r'(?i)(mongodb|postgres|mysql|redis)://[a-zA-Z0-9._%-]+:[a-zA-Z0-9._%-]+@[a-zA-Z0-9.-]+',
+                "description": "Database connection string with credentials",
+                "validate": lambda m, ctx: '@' in m and ':' in m and 'example' not in m.lower()
+            },
+            {
+                "name": "S3 Bucket URL",
+                "regex": r'https?://([a-z0-9.-]+)\.s3\.amazonaws\.com',
+                "description": "AWS S3 bucket URL",
+                "validate": lambda m, ctx: 'example' not in m
+            },
+            {
+                "name": "Hardcoded Password",
+                "regex": r'(?i)password\s*[:=]\s*["\']([^"\']{8,})["\']',
+                "description": "Hardcoded password detected",
+                "validate": lambda m, ctx: not any(x in m.lower() for x in ['example', 'password', '123456', 'your_password', 'enter'])
+            }
         ],
         "MEDIUM": [
-            {"name": "API Endpoint", "regex": r'["\']((?:/api/|/v[1-9]/|/rest/)[a-zA-Z0-9_/-]+)["\']', "description": "API endpoint path"},
-            {"name": "Hidden Parameter", "regex": r'[?&](admin|debug|test|token|auth|source)=', "description": "Sensitive URL parameter"},
-            {"name": "Full HTTP URL", "regex": r'https?://[a-zA-Z0-9\-\._~:/?#\[\]@!$&\'()*+,;=%]+', "description": "Complete HTTP/HTTPS URL"},
+            {
+                "name": "API Endpoint",
+                "regex": r'["\']((\/api\/v\d+|\/rest\/v\d+|\/graphql)\/[a-zA-Z0-9_/-]+)["\']',
+                "description": "API endpoint discovered",
+                "validate": lambda m, ctx: len(m) > 10
+            },
+            {
+                "name": "Admin Panel URL",
+                "regex": r'["\'](\/(admin|dashboard|panel|wp-admin|administrator)\/[^"\']*)["\']',
+                "description": "Admin/Dashboard URL found",
+                "validate": lambda m, ctx: True
+            },
+            {
+                "name": "Sensitive Parameter",
+                "regex": r'[?&](api_key|token|access_token|auth|password|secret)=([^&\s"\']+)',
+                "description": "Sensitive URL parameter",
+                "validate": lambda m, ctx: not any(x in m.lower() for x in ['example', 'your', 'xxx'])
+            }
         ],
         "VULN": [
-            {"name": "XSS Sink", "regex": r'\.innerHTML\s*=', "description": "Potential XSS vulnerability (innerHTML)"},
-            {"name": "Unsafe Eval", "regex": r'eval\s*\(', "description": "Dangerous eval() usage"},
-            {"name": "Unsafe JSON", "regex": r'JSON\.parse\([^)]*\+[^)]*\)', "description": "Unsafe JSON parsing with concatenation"},
-            {"name": "LocalStorage", "regex": r'localStorage\.(getItem|setItem)\(', "description": "localStorage usage detected"},
+            {
+                "name": "DOM XSS Sink",
+                "regex": r'(document\.write|\.innerHTML\s*=|\.outerHTML\s*=)\s*.*\+',
+                "description": "Potential DOM-based XSS vulnerability",
+                "validate": lambda m, ctx: '+' in ctx and 'innerHTML' in ctx
+            },
+            {
+                "name": "Dangerous eval()",
+                "regex": r'eval\s*\(\s*[^)]*\+',
+                "description": "Dangerous eval() with concatenation",
+                "validate": lambda m, ctx: '+' in ctx or 'concat' in ctx.lower()
+            },
+            {
+                "name": "SQL Injection Pattern",
+                "regex": r'(?i)query\s*=.*\+.*["\']SELECT|INSERT|UPDATE|DELETE',
+                "description": "Potential SQL injection vulnerability",
+                "validate": lambda m, ctx: True
+            }
         ],
         "INFO": [
-            {"name": "Email", "regex": r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', "description": "Email address found"},
-            {"name": "Phone Number", "regex": r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', "description": "Phone number pattern"},
+            {
+                "name": "Email Address",
+                "regex": r'\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b',
+                "description": "Email address found",
+                "validate": lambda m, ctx: not any(x in m.lower() for x in ['example.com', 'test.com', 'domain.com', 'sample.com', '@example', 'noreply@', 'no-reply@']) and not m.endswith(('.png', '.jpg', '.css', '.js'))
+            },
+            {
+                "name": "Subdomain/Internal Domain",
+                "regex": r'https?://([a-z0-9-]+)\.(internal|local|corp|dev|stage|staging)\.[a-z]+',
+                "description": "Internal/Development domain",
+                "validate": lambda m, ctx: True
+            }
         ]
-    }
+    },
+    
+    # Files/patterns to skip completely
+    "skip_patterns": [
+        r'jquery.*\.js',
+        r'bootstrap.*\.js',
+        r'angular.*\.js',
+        r'react.*\.js',
+        r'vue.*\.js',
+        r'lodash.*\.js',
+        r'moment.*\.js',
+        r'\.min\.js$',
+        r'analytics\.js',
+        r'gtag\.js',
+        r'google.*analytics'
+    ]
 }
 
 # ==============================================================================
-# [SECTION 2] ENHANCED DATA MODELS
+# [SECTION 2] DATA MODELS
 # ==============================================================================
 
 @dataclass
@@ -68,23 +186,24 @@ class Finding:
     context: str
     description: str = ""
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    hash: str = field(init=False)
     line_number: int = 0
     recommendation: str = ""
+    confidence: str = "HIGH"  # HIGH, MEDIUM, LOW
 
-    def __post_init__(self):
-        raw = f"{self.type}:{self.match}:{self.source}"
-        self.hash = hashlib.md5(raw.encode()).hexdigest()
-        
-        # Add recommendations based on severity
-        if self.severity == "CRITICAL":
-            self.recommendation = "URGENT: Rotate this credential immediately and review access logs"
-        elif self.severity == "HIGH":
-            self.recommendation = "Review and restrict access to this sensitive information"
-        elif self.severity == "MEDIUM":
-            self.recommendation = "Verify if this information should be publicly accessible"
-        elif self.severity == "VULN":
-            self.recommendation = "Review code for potential security vulnerabilities"
+    def to_output(self):
+        """Clean output format"""
+        return {
+            "severity": self.severity,
+            "type": self.type,
+            "description": self.description,
+            "match": self.match[:100] + "..." if len(self.match) > 100 else self.match,  # Truncate long matches
+            "source_file": self.source,
+            "line_number": self.line_number,
+            "context": self.context[:200] + "..." if len(self.context) > 200 else self.context,
+            "recommendation": self.recommendation,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp
+        }
 
 @dataclass
 class ScanStats:
@@ -92,10 +211,9 @@ class ScanStats:
     end_time: float = 0
     urls_crawled: int = 0
     js_files_found: int = 0
+    js_files_skipped: int = 0
     bytes_scanned: int = 0
     errors: int = 0
-    external_js: int = 0
-    inline_scripts: int = 0
     findings_by_severity: dict = field(default_factory=lambda: {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "VULN": 0, "INFO": 0})
     
     def to_dict(self):
@@ -104,8 +222,7 @@ class ScanStats:
             "scan_duration_seconds": round(duration, 2),
             "urls_crawled": self.urls_crawled,
             "js_files_analyzed": self.js_files_found,
-            "external_js_files": self.external_js,
-            "inline_scripts": self.inline_scripts,
+            "js_files_skipped": self.js_files_skipped,
             "total_bytes_scanned": self.bytes_scanned,
             "errors_encountered": self.errors,
             "findings_by_severity": self.findings_by_severity,
@@ -113,14 +230,16 @@ class ScanStats:
         }
 
 # ==============================================================================
-# [SECTION 3] CORE ENGINE WITH ENHANCED OUTPUT
+# [SECTION 3] SMART ENGINE WITH ADVANCED FILTERING
 # ==============================================================================
 
 class JSHunterEngine:
-    def __init__(self, start_url, max_depth, include_cdn, threads=15, timeout=25):
+    def __init__(self, start_url, max_depth, include_cdn, filter_common_libs=True, min_confidence="MEDIUM", threads=15, timeout=25):
         self.start_url = start_url
         self.max_depth = max_depth
         self.include_cdn = include_cdn
+        self.filter_common_libs = filter_common_libs
+        self.min_confidence = min_confidence
         self.threads = threads
         self.timeout = timeout
         
@@ -128,15 +247,15 @@ class JSHunterEngine:
         self.visited = set()
         self.js_files = set()
         self.findings = []
+        self.finding_hashes = set()  # For deduplication
         self.stats = ScanStats()
         
-        # Safe scope extraction
         try:
             self.scope_domain = urlparse(start_url).netloc.replace("www.", "")
         except:
             self.scope_domain = ""
 
-        # Compile Regex with descriptions
+        # Compile patterns
         self.patterns = {}
         for sev, items in DEFAULT_CONFIG['signatures'].items():
             self.patterns[sev] = []
@@ -144,11 +263,26 @@ class JSHunterEngine:
                 try:
                     self.patterns[sev].append({
                         "type": item["name"],
-                        "regex": re.compile(item["regex"]),
-                        "description": item.get("description", "")
+                        "regex": re.compile(item["regex"], re.MULTILINE),
+                        "description": item.get("description", ""),
+                        "validate": item.get("validate", lambda m, ctx: True)
                     })
-                except: 
-                    pass
+                except Exception as e:
+                    Actor.log.warning(f"Failed to compile pattern {item.get('name')}: {e}")
+
+        # Compile skip patterns
+        self.skip_patterns = [re.compile(p, re.IGNORECASE) for p in DEFAULT_CONFIG['skip_patterns']]
+
+    def should_skip_file(self, url):
+        """Check if file should be skipped (common libraries)"""
+        if not self.filter_common_libs:
+            return False
+        
+        for pattern in self.skip_patterns:
+            if pattern.search(url):
+                Actor.log.debug(f"Skipping common library: {url}")
+                return True
+        return False
 
     async def get_session(self):
         if not self.session:
@@ -163,159 +297,192 @@ class JSHunterEngine:
     def is_javascript_resource(self, url, response_headers=None):
         parsed = urlparse(url)
         path = parsed.path.lower()
-        if re.search(r'\.(js|mjs|jsx|ts|tsx)(\?|$|#)', path): return True, "Extension"
-        if "javascript" in path or "script" in path: return True, "Path"
+        if re.search(r'\.(js|mjs|jsx)(\?|$|#)', path): 
+            return True
         if response_headers:
             ctype = response_headers.get('Content-Type', '').lower()
-            if any(t in ctype for t in ['javascript', 'ecmascript', 'json']): return True, "Content-Type"
-        return False, None
+            if 'javascript' in ctype or 'ecmascript' in ctype:
+                return True
+        return False
 
     def is_in_scope(self, url):
         parsed = urlparse(url)
         netloc = parsed.netloc
         
         if self.include_cdn:
-            cdn_domains = ['unpkg', 'cdnjs', 'jsdelivr', 'googleapis', 'cloudfront', 's3']
+            cdn_domains = ['unpkg', 'cdnjs', 'jsdelivr', 'googleapis', 'cloudflare']
             if any(cdn in netloc for cdn in cdn_domains): 
                 return True
         
-        if url.endswith('.js'): 
-            return True
         return self.scope_domain in netloc
 
-    def is_false_positive(self, finding):
-        match = finding.match.lower()
-        ftype = finding.type
-        context = finding.context.lower()
+    def calculate_confidence(self, finding, match_str, context):
+        """Calculate confidence score"""
+        confidence = "HIGH"
         
-        if "IP" in ftype:
-            if re.search(r'(version|v|jquery|min\.js)', context): return True
-            if match in ['1.1.1.1', '127.0.0.1', '0.0.0.0', '255.255.255.255']: return True
-        if "Email" in ftype:
-            if any(x in match for x in ['example', 'test', 'domain', 'noreply', 'demo']): return True
-            if match.endswith(('.png', '.jpg', '.gif', '.css', '.js')): return True
-        if "Key" in ftype and "EXAMPLE" in finding.match.upper(): return True
-        if "URL" in ftype and any(x in match for x in ['example.com', 'localhost']): return True
-        return False
+        # Lower confidence for very short matches
+        if len(match_str) < 20:
+            confidence = "MEDIUM"
+        
+        # Lower confidence if in minified code
+        if re.search(r'[a-z]{1,2}\.[a-z]{1,2}\(', context) or 'var ' not in context:
+            confidence = "MEDIUM"
+        
+        # Higher confidence for critical findings
+        if finding.severity == "CRITICAL" and len(match_str) >= 30:
+            confidence = "HIGH"
+            
+        return confidence
 
-    def get_line_number(self, text, match_position):
-        """Calculate line number for better reporting"""
-        try:
-            return text[:match_position].count('\n') + 1
-        except:
-            return 0
+    def get_recommendation(self, severity, finding_type):
+        """Get actionable recommendations"""
+        recommendations = {
+            "CRITICAL": {
+                "default": "🚨 IMMEDIATE ACTION REQUIRED: Rotate/revoke this credential immediately. Review access logs for unauthorized usage.",
+                "AWS Access Key": "Rotate AWS credentials immediately via IAM console. Check CloudTrail logs for unauthorized access.",
+                "Private Key": "Regenerate key pair immediately. Review all systems using this key.",
+                "JWT Token": "Invalidate this token and regenerate with shorter expiry. Check for token leakage.",
+            },
+            "HIGH": {
+                "default": "⚠️ HIGH PRIORITY: Restrict access to this information. Review code for security improvements.",
+                "Database Connection String": "Move credentials to environment variables. Use secret management system.",
+                "Internal IP Address": "Avoid hardcoding internal IPs. Use service discovery or environment configs.",
+            },
+            "MEDIUM": {
+                "default": "Review if this information should be publicly accessible.",
+            },
+            "VULN": {
+                "default": "⚠️ SECURITY VULNERABILITY: Review and fix this code pattern to prevent exploits.",
+                "DOM XSS Sink": "Use textContent instead of innerHTML. Sanitize all user inputs.",
+                "Dangerous eval()": "Avoid eval(). Use safer alternatives like JSON.parse() or Function constructor.",
+            }
+        }
+        
+        return recommendations.get(severity, {}).get(finding_type, recommendations.get(severity, {}).get("default", ""))
 
     def analyze_content(self, url, content):
         if content is None: 
             return
+        
         try:
             text = content if isinstance(content, str) else content.decode('utf-8', errors='replace')
-            if len(text) < 20: 
+            if len(text) < 50: 
                 return
 
             # Skip huge files
-            if len(text) > 1000000: 
+            if len(text) > 2000000:
                 Actor.log.warning(f"Skipping large file: {url} ({len(text)} bytes)")
-                return 
+                return
 
             self.stats.bytes_scanned += len(text)
 
-            # Beautify for better analysis
-            try: 
+            # Try to beautify
+            original_text = text
+            try:
                 text = jsbeautifier.beautify(text)
-            except: 
-                pass
+            except:
+                text = original_text
 
-            # Regex Scan
+            # Scan with patterns
             for severity, items in self.patterns.items():
                 for item in items:
-                    for match in item['regex'].finditer(text):
-                        match_str = match.group(0)
-                        match_pos = match.start()
-                        
-                        # Extract context
-                        start = max(0, match_pos - 75)
-                        end = min(len(text), match.end() + 75)
-                        context = text[start:end].strip().replace('\n', ' ')
-                        
-                        # Calculate line number
-                        line_num = self.get_line_number(text, match_pos)
+                    try:
+                        for match in item['regex'].finditer(text):
+                            match_str = match.group(1) if match.lastindex else match.group(0)
+                            match_pos = match.start()
+                            
+                            # Extract context
+                            start = max(0, match_pos - 100)
+                            end = min(len(text), match.end() + 100)
+                            context = text[start:end].strip().replace('\n', ' ')
+                            
+                            # Validate with custom function
+                            if not item['validate'](match_str, context):
+                                continue
+                            
+                            # Calculate line number
+                            line_num = text[:match_pos].count('\n') + 1
+                            
+                            # Calculate confidence
+                            confidence = self.calculate_confidence(
+                                type('F', (), {'severity': severity})(), 
+                                match_str, 
+                                context
+                            )
+                            
+                            # Skip low confidence if filter enabled
+                            if self.min_confidence == "HIGH" and confidence != "HIGH":
+                                continue
 
-                        # Create finding
-                        f = Finding(
-                            type=item['type'],
-                            match=match_str,
-                            source=url,
-                            severity=severity,
-                            context=context,
-                            description=item.get('description', ''),
-                            line_number=line_num
-                        )
+                            # Create finding
+                            finding = Finding(
+                                type=item['type'],
+                                match=match_str,
+                                source=url,
+                                severity=severity,
+                                context=context,
+                                description=item['description'],
+                                line_number=line_num,
+                                recommendation=self.get_recommendation(severity, item['type']),
+                                confidence=confidence
+                            )
 
-                        if not self.is_false_positive(f):
-                            if not any(e.hash == f.hash for e in self.findings):
-                                self.findings.append(f)
+                            # Deduplicate
+                            finding_hash = hashlib.md5(f"{finding.type}:{finding.match}:{finding.source}".encode()).hexdigest()
+                            if finding_hash not in self.finding_hashes:
+                                self.finding_hashes.add(finding_hash)
+                                self.findings.append(finding)
                                 self.stats.findings_by_severity[severity] += 1
                                 
-                                # Push clean, readable data to Apify (without hash in main output)
-                                finding_data = {
-                                    "finding_id": f.hash[:8],  # Short ID for reference
-                                    "severity": f.severity,
-                                    "type": f.type,
-                                    "description": f.description,
-                                    "match": f.match,
-                                    "source_file": f.source,
-                                    "line_number": f.line_number,
-                                    "context": f.context,
-                                    "recommendation": f.recommendation,
-                                    "timestamp": f.timestamp
-                                }
-                                asyncio.create_task(Actor.push_data(finding_data))
+                                # Push to Apify
+                                asyncio.create_task(Actor.push_data(finding.to_output()))
                                 
-                                Actor.log.info(f"[{severity}] {item['type']} found in {url} (Line {line_num})")
+                                Actor.log.info(f"✓ [{severity}] {item['type']} in {url}:{line_num}")
+                    
+                    except Exception as e:
+                        Actor.log.debug(f"Pattern error: {e}")
+                        
         except Exception as e:
-            Actor.log.error(f"Error analyzing content from {url}: {str(e)}")
+            Actor.log.error(f"Error analyzing {url}: {str(e)}")
             self.stats.errors += 1
 
     async def process_js(self, session, url):
         if url in self.js_files: 
             return
+        
+        if self.should_skip_file(url):
+            self.stats.js_files_skipped += 1
+            return
+            
         self.js_files.add(url)
+        
         try:
-            content = None
             async with session.get(url, timeout=20, ssl=False) as resp:
                 if resp.status == 200:
                     content = await resp.read()
-            if content and len(content) > 0:
-                self.stats.js_files_found += 1
-                self.stats.external_js += 1
-                self.analyze_content(url, content)
-        except Exception as e:
-            Actor.log.debug(f"Failed to fetch {url}: {str(e)}")
+                    if content and len(content) > 0:
+                        self.stats.js_files_found += 1
+                        self.analyze_content(url, content)
+        except:
+            pass
 
-    def extract_all_js_sources(self, html, base_url):
+    def extract_js_sources(self, html, base_url):
         soup = BeautifulSoup(html, 'html.parser')
         js_sources = []
         
         # External scripts
         for script in soup.find_all('script', src=True):
             src = script.get('src')
-            if src: 
-                js_sources.append(('external', urljoin(base_url, src), None))
+            if src:
+                full_url = urljoin(base_url, src)
+                if not self.should_skip_file(full_url):
+                    js_sources.append(('external', full_url, None))
         
-        # Inline scripts
+        # Inline scripts (only if substantial)
         for i, script in enumerate(soup.find_all('script', src=False)):
-            if script.string and len(script.string.strip()) > 10:
+            if script.string and len(script.string.strip()) > 100:  # Minimum 100 chars
                 v_url = f"inline://{urlparse(base_url).netloc}/script_{i}"
                 js_sources.append(('inline', v_url, script.string))
-                self.stats.inline_scripts += 1
-                
-        # Regex-based JS discovery
-        potential = re.findall(r'["\']([^"\']+\.js(?:\?[^"\']*)?)["\']', str(html))
-        for p in potential:
-            full = urljoin(base_url, p)
-            if self.is_in_scope(full):
-                js_sources.append(('regex', full, None))
         
         return js_sources
 
@@ -323,8 +490,7 @@ class JSHunterEngine:
         if depth > self.max_depth or url in self.visited: 
             return
         self.visited.add(url)
-        Actor.log.info(f"Crawling (depth {depth}): {url}")
-
+        
         session = await self.get_session()
         try:
             async with session.get(url, timeout=self.timeout, ssl=False) as resp:
@@ -334,124 +500,109 @@ class JSHunterEngine:
                 if not content: 
                     return
 
-                is_js, detection_method = self.is_javascript_resource(url, resp.headers)
-                if is_js:
-                    if url not in self.js_files:
+                if self.is_javascript_resource(url, resp.headers):
+                    if url not in self.js_files and not self.should_skip_file(url):
                         self.js_files.add(url)
-                        Actor.log.info(f"JS file detected via {detection_method}: {url}")
                         self.analyze_content(url, content)
                     return
 
                 html = content.decode('utf-8', errors='ignore')
                 self.stats.urls_crawled += 1
-                sources = self.extract_all_js_sources(html, url)
+                sources = self.extract_js_sources(html, url)
 
-                # Process all JS sources
+                # Process JS sources
                 for s_type, s_url, s_code in sources:
-                    if s_type in ['external', 'regex']:
+                    if s_type == 'external':
                         if s_url not in self.js_files and self.is_in_scope(s_url):
                             asyncio.create_task(self.process_js(session, s_url))
-                    else:  # inline
+                    else:
                         if s_url not in self.js_files:
                             self.js_files.add(s_url)
                             self.analyze_content(s_url, s_code)
 
-                # Recursive crawling
+                # Crawl links
                 if depth < self.max_depth:
                     soup = BeautifulSoup(html, 'html.parser')
                     links = [urljoin(url, a.get('href')) for a in soup.find_all('a', href=True)]
                     tasks = [
                         self.process_url(link, depth + 1) 
-                        for link in links 
+                        for link in links[:50]  # Limit to 50 links per page
                         if self.is_in_scope(link) and link not in self.visited
                     ]
-                    if tasks: 
+                    if tasks:
                         await asyncio.gather(*tasks, return_exceptions=True)
                         
         except Exception as e:
-            Actor.log.error(f"Error processing {url}: {str(e)}")
             self.stats.errors += 1
 
     async def run(self):
-        Actor.log.info(f"Starting scan on: {self.start_url}")
-        Actor.log.info(f"Max depth: {self.max_depth}, Include CDN: {self.include_cdn}")
+        Actor.log.info(f"🔍 Starting scan: {self.start_url}")
         
         await self.process_url(self.start_url, 1)
         
-        if self.session: 
+        if self.session:
             await self.session.close()
         
         self.stats.end_time = time.time()
         
-        # Generate final summary report
+        # Generate summary
         summary = {
             "scan_info": {
                 "target_url": self.start_url,
-                "scan_date": datetime.utcnow().isoformat(),
-                "max_depth": self.max_depth,
-                "include_cdn": self.include_cdn
+                "scan_completed": datetime.utcnow().isoformat(),
+                "configuration": {
+                    "max_depth": self.max_depth,
+                    "include_cdn": self.include_cdn,
+                    "filter_libraries": self.filter_common_libs,
+                    "min_confidence": self.min_confidence
+                }
             },
             "statistics": self.stats.to_dict(),
-            "findings_summary": {
-                "total_findings": len(self.findings),
-                "by_severity": self.stats.findings_by_severity,
-                "unique_sources": len(set(f.source for f in self.findings))
+            "summary": {
+                "critical_findings": self.stats.findings_by_severity["CRITICAL"],
+                "high_findings": self.stats.findings_by_severity["HIGH"],
+                "total_findings": sum(self.stats.findings_by_severity.values()),
+                "files_analyzed": self.stats.js_files_found,
+                "files_skipped": self.stats.js_files_skipped
             }
         }
         
-        # Push summary as separate dataset entry
-        await Actor.push_data({
-            "type": "SCAN_SUMMARY",
-            "summary": summary
-        })
+        await Actor.push_data({"type": "SCAN_SUMMARY", "data": summary})
         
         Actor.log.info("="*60)
-        Actor.log.info("SCAN COMPLETE")
-        Actor.log.info(f"Total URLs Crawled: {self.stats.urls_crawled}")
-        Actor.log.info(f"JS Files Analyzed: {self.stats.js_files_found}")
-        Actor.log.info(f"Total Findings: {len(self.findings)}")
-        Actor.log.info(f"Critical: {self.stats.findings_by_severity['CRITICAL']}")
-        Actor.log.info(f"High: {self.stats.findings_by_severity['HIGH']}")
-        Actor.log.info(f"Medium: {self.stats.findings_by_severity['MEDIUM']}")
-        Actor.log.info(f"Vulnerabilities: {self.stats.findings_by_severity['VULN']}")
+        Actor.log.info("✅ SCAN COMPLETE")
+        Actor.log.info(f"   Critical: {self.stats.findings_by_severity['CRITICAL']}")
+        Actor.log.info(f"   High: {self.stats.findings_by_severity['HIGH']}")
+        Actor.log.info(f"   Total Findings: {sum(self.stats.findings_by_severity.values())}")
         Actor.log.info("="*60)
 
 # ==============================================================================
-# MAIN ENTRY POINT
+# MAIN ENTRY
 # ==============================================================================
 
 async def main():
     async with Actor:
-        Actor.log.info("JS Hunter Advanced - Starting...")
-        
-        # Get input
         actor_input = await Actor.get_input() or {}
         
         start_urls = actor_input.get('startUrls', [])
         max_depth = actor_input.get('maxDepth', 2)
         include_cdn = actor_input.get('includeCdn', False)
+        filter_libs = actor_input.get('filterCommonLibraries', True)
+        min_confidence = actor_input.get('minConfidence', 'MEDIUM')  # HIGH, MEDIUM, LOW
 
         if not start_urls:
-            Actor.log.error("❌ No start URLs provided!")
-            Actor.log.info("Please provide 'startUrls' in the input")
+            Actor.log.error("❌ No URLs provided")
             return
 
-        Actor.log.info(f"Processing {len(start_urls)} target(s)")
-        
-        # Process all URLs
         tasks = []
         for req in start_urls:
             url = req.get('url')
             if url:
-                Actor.log.info(f"Queuing scan for: {url}")
-                engine = JSHunterEngine(url, max_depth, include_cdn)
+                engine = JSHunterEngine(url, max_depth, include_cdn, filter_libs, min_confidence)
                 tasks.append(engine.run())
         
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-            Actor.log.info("✅ All scans completed successfully")
-        else:
-            Actor.log.warning("No valid URLs to process")
 
 if __name__ == '__main__':
     asyncio.run(main())
