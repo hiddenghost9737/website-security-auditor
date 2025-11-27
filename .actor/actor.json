@@ -1,18 +1,64 @@
 {
-    "actorSpecification": 1,
-    "name": "website-security-auditor",
-    "title": "Website Security Auditor",
-    "version": "1.0.0",
-    "dockerfile": "./Dockerfile",
-    "output": {
-        "actorOutputSchemaVersion": 1,
-        "title": "Security Scan Results",
-        "properties": {
-            "results": {
-                "type": "string",
-                "title": "View Findings",
-                "template": "{{links.apiDefaultDatasetUrl}}/items"
+  "actorSpecification": 1,
+  "name": "js-hunter-advanced",
+  "title": "JS Hunter - Advanced JavaScript Security Scanner",
+  "description": "Automatically crawls websites and scans all JavaScript files for exposed secrets, API keys, credentials, and security vulnerabilities. Finds external JS, inline scripts, and hidden JavaScript resources.",
+  "version": "1.0",
+  "meta": {
+    "templateId": "python-start"
+  },
+  "input": "./.actor/input_schema.json",
+  "dockerfile": "./Dockerfile",
+  "readme": "./README.md",
+  "categories": [
+    "SECURITY",
+    "DEVELOPER_TOOLS"
+  ],
+  "storages": {
+    "dataset": {
+      "actorSpecification": 1,
+      "title": "Security Findings",
+      "description": "Contains all discovered security findings with details",
+      "views": {
+        "overview": {
+          "title": "Security Overview",
+          "transformation": {
+            "fields": [
+              "severity",
+              "type",
+              "match",
+              "source_file",
+              "line_number",
+              "confidence"
+            ]
+          },
+          "display": {
+            "component": "table",
+            "properties": {
+              "severity": {
+                "label": "Severity",
+                "format": "text"
+              },
+              "type": {
+                "label": "Finding Type",
+                "format": "text"
+              },
+              "match": {
+                "label": "Detected Value",
+                "format": "text"
+              },
+              "source_file": {
+                "label": "Source",
+                "format": "link"
+              },
+              "confidence": {
+                "label": "Confidence",
+                "format": "text"
+              }
             }
+          }
         }
+      }
     }
+  }
 }
