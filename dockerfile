@@ -1,15 +1,11 @@
-# Python 3.9 image use
-FROM python:3.9-slim
+FROM apify/actor-python:3.11
 
-# Working directory set
-WORKDIR /usr/src/app
-
-# Dependencies install
+# Copy requirements and install dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Code copy
-COPY . .
+# Copy source code
+COPY . ./
 
-# Actor run command
-CMD ["python3", "main.py"]
+# Run the actor
+CMD ["python3", "-m", "src.main"]
