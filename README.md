@@ -1,65 +1,175 @@
-# 🛡️ Website Security Auditor & JS Secrets Scanner
+```markdown
+# 🔍 JS Hunter - Advanced JavaScript Security Scanner
 
-[![Apify](https://img.shields.io/badge/Apify-Actor-green)](https://apify.com/)
-[![Python](https://img.shields.io/badge/Python-3.9+-blue)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
+**Automatically discovers and scans ALL JavaScript files on a website for security issues.**
 
-**A high-speed, asynchronous static analysis tool designed to help developers and security teams identify exposed secrets, API keys, and sensitive configuration data hidden within client-side JavaScript files.**
+## 🎯 What It Does
 
----
+This actor automatically:
+- ✅ Crawls your target website(s)
+- ✅ Finds ALL JavaScript files (external, inline, hidden)
+- ✅ Scans for exposed secrets, API keys, and credentials
+- ✅ Detects security vulnerabilities (XSS, eval, etc.)
+- ✅ Provides actionable recommendations
 
-## 🚀 Why this tool?
+## 🚀 Features
 
-Modern web applications rely heavily on JavaScript. Often, developers accidentally commit sensitive keys (Google Maps API, AWS Credentials, Slack Tokens) or sensitive logic into client-side code. 
+### Automatic Discovery
+- External JavaScript files (`<script src="...">`)
+- Inline JavaScript (`<script>...</script>`)
+- Hidden JS files found in HTML source
+- Dynamic imports and lazy-loaded scripts
+- Optional CDN scanning
 
-This Actor crawls a target website, extracts all internal and external JavaScript files, and performs a deep regex-based audit to report potential security leaks before malicious actors find them.
+### What It Finds
 
-### 🌟 Key Features
-* **⚡ Blazing Fast:** Built on Python `asyncio` and `aiohttp` for concurrent scanning of hundreds of scripts.
-* **🔍 Deep Inspection:** Scans inline scripts, external JS files, and CDN resources.
-* **🛡️ Signature Based:** Detects 80+ types of secrets including:
-    * Google API Keys & Firebase Configs
-    * AWS Access Keys & Secrets
-    * Slack, Stripe, & GitHub Tokens
-    * Private Keys (RSA/DSA)
-    * Database Connection Strings (MongoDB, Postgres)
-* **📉 Low False Positives:** Intelligent context analysis to ignore example code and comments.
-* **JSON Output:** Clean, structured data ready for integration with other DevSecOps tools.
+**CRITICAL Issues:**
+- AWS Access Keys & Secret Keys
+- Google API Keys
+- Firebase Configurations
+- Slack Tokens
+- Stripe API Keys (Live & Test)
+- GitHub Personal Access Tokens
+- Private Keys (RSA, DSA, EC)
+- JWT Tokens
+- Generic API Keys
 
----
+**HIGH Priority:**
+- Internal IP Addresses
+- Database Connection Strings
+- S3 Bucket URLs
+- Hardcoded Passwords
 
-## 🛠️ Input Parameters
+**MEDIUM Priority:**
+- API Endpoints
+- Admin Panel URLs
+- Sensitive URL Parameters
 
-The Actor takes the following inputs:
+**VULNERABILITIES:**
+- DOM XSS Sinks
+- Dangerous eval() usage
+- SQL Injection patterns
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `startUrls` | Array | `[]` | List of target URLs to scan (e.g., `https://example.com`). |
-| `maxDepth` | Integer | `2` | How deep the crawler should traverse links (1 = scan single page). |
-| `includeCdn` | Boolean | `false` | If true, scans external scripts (e.g., hosted on AWS S3, Cloudflare). |
+**INFO:**
+- Email Addresses
+- Internal/Development Domains
 
----
-
-## 📊 Sample Output
-
-The tool provides findings in a structured JSON format:
+## 📊 Input Configuration
 
 ```json
-[
-  {
-    "finding_type": "Google API Key",
-    "severity": "CRITICAL",
-    "match": "AIzaSyBwQcjgmXUAsw5r4FZXO5t8_EZ_aUm_TGE",
-    "source_url": "[https://example.com/assets/main.bundle.js](https://example.com/assets/main.bundle.js)",
-    "context": "apiKey: \"AIzaSyBwQcjgmXUAsw5r4FZXO5t8_EZ_aUm_TGE\", authDomain:...",
-    "hash": "5d41402abc4b2a76b9719d911017c592"
-  },
-  {
-    "finding_type": "Potential XSS Sink",
-    "severity": "MEDIUM",
-    "match": ".innerHTML =",
-    "source_url": "[https://example.com/js/ui-utils.js](https://example.com/js/ui-utils.js)",
-    "context": "document.getElementById('app').innerHTML = userInput;",
-    "hash": "a1b2c3d4e5f6..."
+{
+  "startUrls": [
+    {"url": "https://yourwebsite.com"}
+  ],
+  "maxDepth": 2,
+  "includeCdn": false,
+  "filterCommonLibraries": true,
+  "minConfidence": "MEDIUM"
+}
+```
+
+### Parameters Explained
+
+- **startUrls**: Target website(s) to scan
+- **maxDepth**: How deep to crawl (1-5)
+  - 1 = Only scan the start URL
+  - 2 = Scan start URL + all linked pages (recommended)
+  - 3+ = Deep crawl (slower)
+- **includeCdn**: Scan CDN-hosted libraries (usually not needed)
+- **filterCommonLibraries**: Skip jQuery, Bootstrap, etc. (recommended: true)
+- **minConfidence**: Result filtering
+  - HIGH = Fewer false positives, high accuracy
+  - MEDIUM = Balanced (recommended)
+  - LOW = More results, may include false positives
+
+## 📤 Output Format
+
+Each finding includes:
+
+```json
+{
+  "severity": "CRITICAL",
+  "type": "AWS Access Key",
+  "description": "AWS Access Key ID detected",
+  "match": "AKIAIOSFODNN7EXAMPLE",
+  "source_file": "https://example.com/config.js",
+  "line_number": 45,
+  "context": "const config = { awsKey: 'AKIAIOSFODNN7EXAMPLE' }",
+  "recommendation": "🚨 Rotate AWS credentials immediately via IAM console.",
+  "confidence": "HIGH",
+  "timestamp": "2025-11-27T12:30:45"
+}
+```
+
+### Summary Report
+
+The last entry in the dataset is a summary:
+
+```json
+{
+  "type": "SCAN_SUMMARY",
+  "data": {
+    "scan_info": {
+      "target_url": "https://example.com",
+      "scan_completed": "2025-11-27T12:35:00"
+    },
+    "statistics": {
+      "scan_duration_seconds": 45.67,
+      "urls_crawled": 25,
+      "js_files_analyzed": 42,
+      "total_findings": 15
+    },
+    "summary": {
+      "critical_findings": 2,
+      "high_findings": 5,
+      "total_findings": 15
+    }
   }
-]
+}
+```
+
+## 🎯 How It Works
+
+1. **Crawling**: Starts from your target URL and crawls links up to specified depth
+2. **JS Discovery**: Finds all JavaScript resources:
+   - Parses HTML for `<script>` tags
+   - Extracts inline JavaScript
+   - Discovers hidden JS files via regex
+3. **Smart Filtering**: Skips common libraries (jQuery, Bootstrap, etc.)
+4. **Pattern Matching**: Scans code with 30+ regex patterns
+5. **Validation**: Each finding is validated to reduce false positives
+6. **Confidence Scoring**: Assigns HIGH/MEDIUM/LOW confidence
+7. **Reporting**: Outputs clean JSON with actionable recommendations
+
+## 💡 Best Practices
+
+1. **Start with depth 2** - Good balance of coverage vs speed
+2. **Enable library filtering** - Reduces noise from third-party code
+3. **Use MEDIUM confidence** - Best accuracy/coverage balance
+4. **Review CRITICAL findings first** - Immediate security risks
+5. **Check context** - Verify findings aren't false positives
+
+## ⚠️ Important Notes
+
+- This tool is for **security research and authorized testing only**
+- Only scan websites you own or have permission to test
+- Some findings may be false positives - always verify
+- Large websites may take several minutes to scan
+- Rate limiting may occur on some websites
+
+## 🔧 Troubleshooting
+
+**No results found?**
+- Check if website blocks automated tools
+- Try increasing maxDepth
+- Verify URLs are accessible
+
+**Too many false positives?**
+- Set minConfidence to "HIGH"
+- Enable filterCommonLibraries
+- Disable includeCdn
+
+**Scan taking too long?**
+- Reduce maxDepth to 1
+- Enable filterCommonLibraries
+- Scan specific pages instead of entire site
