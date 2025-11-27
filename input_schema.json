@@ -1,0 +1,53 @@
+{
+  "title": "JS Hunter Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "Target URLs",
+      "type": "array",
+      "description": "List of websites to scan. The scanner will crawl these URLs and analyze all JavaScript files found.",
+      "editor": "requestListSources",
+      "prefill": [
+        {
+          "url": "https://example.com"
+        }
+      ]
+    },
+    "maxDepth": {
+      "title": "Crawl Depth",
+      "type": "integer",
+      "description": "Maximum depth for crawling links (1 = only start URL, 2 = start URL + 1 level of links, etc.)",
+      "default": 2,
+      "minimum": 1,
+      "maximum": 5,
+      "unit": "levels"
+    },
+    "includeCdn": {
+      "title": "Scan CDN Files",
+      "type": "boolean",
+      "description": "Include JavaScript files hosted on CDNs (unpkg, cdnjs, jsdelivr, etc.). Warning: This will scan third-party libraries.",
+      "default": false
+    },
+    "filterCommonLibraries": {
+      "title": "Filter Common Libraries",
+      "type": "boolean",
+      "description": "Skip scanning common JavaScript libraries like jQuery, Bootstrap, React, etc. Recommended: true",
+      "default": true
+    },
+    "minConfidence": {
+      "title": "Minimum Confidence Level",
+      "type": "string",
+      "description": "Only report findings with this confidence level or higher. HIGH = fewer false positives.",
+      "editor": "select",
+      "default": "MEDIUM",
+      "enum": ["HIGH", "MEDIUM", "LOW"],
+      "enumTitles": [
+        "High - Fewer results, high accuracy",
+        "Medium - Balanced (recommended)",
+        "Low - More results, may include false positives"
+      ]
+    }
+  },
+  "required": ["startUrls"]
+}
