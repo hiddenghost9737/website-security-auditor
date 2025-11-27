@@ -95,7 +95,7 @@ DEFAULT_CONFIG = {
                 "name": "API Endpoint",
                 "regex": r'["\']((\/api\/v\d+|\/graphql)\/[a-zA-Z0-9_/-]{5,})["\']',
                 "description": "Internal API endpoint",
-                "validate": lambda m, ctx: len(m) > 10 and '/v' in m
+                "validate": lambda m, ctx: len(m) > 10 and '/v' in m and 'google' not in m.lower()
             },
             {
                 "name": "Admin Panel Path",
@@ -267,21 +267,35 @@ class JSHunterEngine:
         self.skip_domains = DEFAULT_CONFIG['skip_domains']
 
     def should_skip_file(self, url):
-        """Ultra strict file skipping"""
+        """Nuclear-level file skipping"""
         parsed = urlparse(url)
         domain = parsed.netloc
+        path = parsed.path.lower()
         
         # Skip by domain
         if any(skip_dom in domain for skip_dom in self.skip_domains):
+            Actor.log.debug(f"Skipping (domain): {url}")
+            return True
+        
+        # Skip Google XJS framework files (CRITICAL)
+        if '/xjs/' in url or 'xjs.' in url or '/og/_/' in url:
+            Actor.log.debug(f"Skipping (XJS): {url}")
             return True
         
         # Skip by pattern
         for pattern in self.skip_patterns:
             if pattern.search(url):
+                Actor.log.debug(f"Skipping (pattern): {url}")
                 return True
         
         # Skip minified files
         if '.min.' in url or url.endswith('.min.js'):
+            Actor.log.debug(f"Skipping (minified): {url}")
+            return True
+        
+        # Skip very long URLs (likely tracking/analytics)
+        if len(url) > 200:
+            Actor.log.debug(f"Skipping (long URL): {url[:100]}...")
             return True
             
         return False
